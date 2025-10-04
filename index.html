@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Virus vs Antivirus — Boss Fight (3 фазы)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0a0d10;
+      color: #cfefff;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      overflow: hidden;
+    }
+    #wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: crisp-edges;
+      image-rendering: -webkit-optimize-contrast;
+      background: radial-gradient(1200px 800px at 50% 50%, #0f1620 0%, #0c1118 60%, #0a0d10 100%);
+    }
+    .overlay {
+      position: absolute;
+      left: 0; right: 0; top: 0; bottom: 0;
+      display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none;
+      text-align: center;
+      padding: 24px;
+    }
+    .overlay .panel {
+      pointer-events: auto;
+      background: rgba(10,13,16,0.7);
+      border: 1px solid rgba(120,220,255,0.2);
+      border-radius: 12px;
+      padding: 20px 24px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      max-width: 720px;
+    }
+    .btn {
+      display: inline-block;
+      margin-top: 14px;
+      padding: 10px 16px;
+      border: 1px solid rgba(120,220,255,0.4);
+      border-radius: 8px;
+      color: #cfefff;
+      text-decoration: none;
+      cursor: pointer;
+      background: rgba(29,60,80,0.3);
+    }
+    .btn:hover { background: rgba(29,60,80,0.45); }
+    .hud {
+      position: absolute; left: 0; right: 0; top: 0;
+      padding: 10px 14px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 14px; letter-spacing: 0.3px;
+      user-select: none;
+      pointer-events: none;
+      text-shadow: 0 0 6px rgba(0,255,255,0.25);
+    }
+    .hud .hearts {
+      display: inline-flex; gap: 6px;
+    }
+    .chip {
+      display: inline-block;
+      padding: 4px 8px;
+      border: 1px solid rgba(120,220,255,0.3);
+      border-radius: 999px;
+      background: rgba(18,40,54,0.4);
+      margin-left: 6px;
+    }
+    .bar {
+      width: 40vw; max-width: 520px; min-width: 220px;
+      height: 12px; border: 1px solid rgba(255,80,120,0.4); border-radius: 8px;
+      background: rgba(40,8,16,0.4); overflow: hidden;
+    }
+    .bar .fill {
+      height: 100%; background: linear-gradient(90deg, #ff2a6f, #ffa3c3);
+      box-shadow: 0 0 12px rgba(255, 80, 120, 0.65);
+      width: 100%;
+    }
+    .tiny {
+      font-size: 12px; opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="game"></canvas>
+
+    <div class="hud" id="hud" style="display:none;">
+      <div>
+        <span>Жизни:</span>
+        <span class="hearts" id="hearts"></span>
+        <span class="chip" id="phaseChip">Фаза: 1/3</span>
+        <span class="chip tiny" id="chipInfo">WASD/←↑→↓ — движ; ЛКМ — огонь; P — пауза; M — звук; G — графика</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="text-align:right">
+          <div>Антивирус</div>
+          <div class="tiny" id="bossHPText">HP</div>
+        </div>
+        <div class="bar"><div class="fill" id="bossHPFill"></div></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="menu">
+      <div class="panel">
+        <h2>Я — Вирус. На меня охотится Антивирус (босс из 3 фаз)</h2>
+        <p>Выживай, уворачивайся от “маленьких антивирусов” и снарядов босса, стреляй инфекционными пакетами.</p>
+        <p>
+          Управление: WASD/стрелки — движение, мышь — прицел, ЛКМ — огонь, P — пауза, M — звук, G — переключить свечение.
+        </p>
+        <a class="btn" id="startBtn">Играть</a>
+      </div>
+    </div>
+
+    <div class="overlay" id="pause" style="display:none;">
+      <div class="panel">
+        <h3>Пауза</h3>
+        <p>Нажми P, чтобы продолжить.</p>
+      </div>
+    </div>
+
+    <div class="overlay" id="end" style="display:none;">
+      <div class="panel" id="endPanel"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // Настройка канваса с учетом DPI
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  let DPR = Math.min(window.devicePixelRatio || 1, 2);
+  let W = 0, H = 0, CX = 0, CY = 0;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const { clientWidth, clientHeight } = canvas;
+    canvas.width = Math.floor(clientWidth * DPR);
+    canvas.height = Math.floor(clientHeight * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    W = clientWidth; H = clientHeight; CX = W / 2; CY = H / 2;
+  }
+
+  // UI элементы
+  const hud = document.getElementById('hud');
+  const heartsBox = document.getElementById('hearts');
+  const phaseChip = document.getElementById('phaseChip');
+  const bossHPFill = document.getElementById('bossHPFill');
+  const bossHPText = document.getElementById('bossHPText');
+  const menu = document.getElementById('menu');
+  const pauseOverlay = document.getElementById('pause');
+  const endOverlay = document.getElementById('end');
+  const endPanel = document.getElementById('endPanel');
+  const startBtn = document.getElementById('startBtn');
+
+  // Вспомогательные функции
+  const TAU = Math.PI * 2;
+  const rand = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const len = (x, y) => Math.hypot(x, y);
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const angleBetween = (ax, ay, bx, by) => Math.atan2(by - ay, bx - ax);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const now = () => performance.now();
+
+  // Экранная тряска
+  let shake = 0;
+  function addShake(s) { shake = Math.max(shake, s); }
+
+  // Аудио (очень лёгкий synth)
+  const audio = {
+    ctx: null,
+    enabled: true,
+    init() {
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    },
+    beep(type = 'sine', f = 440, dur = 0.08, vol = 0.04) {
+      if (!this.enabled) return;
+      try {
+        this.init();
+        const t0 = this.ctx.currentTime;
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = type;
+        o.frequency.setValueAtTime(f, t0);
+        g.gain.setValueAtTime(vol, t0);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.connect(g).connect(this.ctx.destination);
+        o.start(t0);
+        o.stop(t0 + dur);
+      } catch(e) {}
+    }
+  };
+
+  // Графика: можно выключать свечение (для слабых ПК)
+  let glowEnabled = true;
+
+  // Ввод
+  const keys = new Set();
+  const mouse = { x: 0, y: 0, down: false, justPressed: false };
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyP') togglePause();
+    else if (e.code === 'KeyM') audio.enabled = !audio.enabled;
+    else if (e.code === 'KeyG') glowEnabled = !glowEnabled;
+    else keys.add(e.code);
+  });
+  window.addEventListener('keyup', (e) => { keys.delete(e.code); });
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+  });
+  canvas.addEventListener('mousedown', () => { mouse.down = true; mouse.justPressed = true; audio.init(); });
+  canvas.addEventListener('mouseup', () => { mouse.down = false; });
+
+  // Состояние игры
+  const State = { Menu: 'menu', Playing: 'playing', Paused: 'paused', Win: 'win', Lose: 'lose' };
+  let gameState = State.Menu;
+
+  // Игрок (Вирус)
+  const player = {
+    x: 0, y: 0, vx: 0, vy: 0,
+    r: 14,
+    speed: 300,
+    friction: 0.86,
+    angle: 0,
+    shootCD: 0,
+    shootRate: 0.16,
+    lives: 5,
+    invul: 0,
+    alive: true,
+  };
+
+  // Босс (Антивирус)
+  const boss = {
+    x: 0, y: 0, vx: 0, vy: 0,
+    r: 60,
+    color: '#ff2a6f',
+    // HP по фазам: feel free подредактировать баланс
+    phase: 1,
+    phaseHP: [100, 140, 200],
+    hp: 100 + 140 + 200,
+    timers: {
+      aimed: 0, ring: 0, drone: 0, spiral: 0, dash: 2.2, sweep: 0, missile: 0
+    },
+    substate: 'idle',
+    subTimer: 0,
+  };
+
+  // Коллекции объектов
+  const playerBullets = [];
+  const bossBullets = [];
+  const drones = [];
+  const particles = [];
+
+  function resetGame() {
+    player.x = CX; player.y = H * 0.78;
+    player.vx = player.vy = 0;
+    player.lives = 3; player.invul = 1.2; player.alive = true;
+    player.shootCD = 0;
+
+    boss.x = CX; boss.y = H * 0.28;
+    boss.vx = boss.vy = 0;
+    boss.phase = 1;
+    boss.phaseHP = [220, 260, 320];
+    boss.hp = boss.phaseHP[0] + boss.phaseHP[1] + boss.phaseHP[2];
+    boss.timers = { aimed: 0, ring: 0, drone: 0, spiral: 0, dash: 2.2, sweep: 0, missile: 0 };
+    boss.substate = 'idle';
+    boss.subTimer = 0;
+
+    playerBullets.length = 0;
+    bossBullets.length = 0;
+    drones.length = 0;
+    particles.length = 0;
+
+    hud.style.display = 'flex';
+    updateHUD();
+  }
+
+  function currentPhaseHPLeft() {
+    const p = boss.phase - 1;
+    let sumPrev = 0;
+    for (let i = 0; i < p; i++) sumPrev += boss.phaseHP[i];
+    return boss.hp - sumPrev;
+  }
+
+  function totalHPBeforePhase(phase) {
+    let s = 0;
+    for (let i = 0; i < phase - 1; i++) s += boss.phaseHP[i];
+    return s;
+  }
+
+  function updateHUD() {
+    // Жизни
+    heartsBox.innerHTML = '';
+    for (let i = 0; i < 3; i++) {
+      const full = i < player.lives;
+      const span = document.createElement('span');
+      span.innerHTML = full ? '🧬' : '⚬';
+      span.style.filter = full ? 'drop-shadow(0 0 8px rgba(0,255,255,0.5))' : 'none';
+      heartsBox.appendChild(span);
+    }
+    // Фаза
+    phaseChip.textContent = `Фаза: ${boss.phase}/3`;
+    // HP бар
+    const hpRatio = clamp(boss.hp / (boss.phaseHP[0] + boss.phaseHP[1] + boss.phaseHP[2]), 0, 1);
+    bossHPFill.style.width = `${hpRatio * 100}%`;
+    bossHPText.textContent = `HP: ${Math.max(0, Math.ceil(boss.hp))}`;
+  }
+
+  // Частицы
+  function spawnParticles(x, y, color, count = 12, speed = 140, life = 0.6) {
+    for (let i = 0; i < count; i++) {
+      const a = rand(0, TAU);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * rand(speed*0.4, speed),
+        vy: Math.sin(a) * rand(speed*0.4, speed),
+        r: rand(1.2, 2.8),
+        life: life * rand(0.7, 1.2),
+        color,
+      });
+    }
+  }
+
+  // Снаряды
+  function spawnPlayerBullet() {
+    const ang = player.angle;
+    const speed = 520;
+    const spread = 0.06;
+    const a = ang + rand(-spread, spread);
+    const vx = Math.cos(a) * speed;
+    const vy = Math.sin(a) * speed;
+    playerBullets.push({
+      x: player.x + Math.cos(a) * (player.r + 6),
+      y: player.y + Math.sin(a) * (player.r + 6),
+      vx, vy, r: 4.5, life: 2.0, color: '#39e8ff'
+    });
+    audio.beep('triangle', rand(740, 820), 0.06, 0.03);
+  }
+
+  function spawnBossBullet(x, y, dir, speed, r=5, type='normal', color='#ff6b9e') {
+    bossBullets.push({ x, y, vx: Math.cos(dir)*speed, vy: Math.sin(dir)*speed, r, life: 8, type, color, angle: dir, turn: 0 });
+  }
+
+  function spawnDrone() {
+    const edge = randInt(0, 3);
+    let x, y;
+    if (edge === 0) { x = rand(40, W-40); y = 50; }
+    else if (edge === 1) { x = rand(40, W-40); y = H-50; }
+    else if (edge === 2) { x = 50; y = rand(40, H-40); }
+    else { x = W-50; y = rand(40, H-40); }
+    const speed = rand(60, 100) + boss.phase * 15;
+    const a = rand(0, TAU);
+    drones.push({
+      x, y,
+      vx: Math.cos(a)*speed, vy: Math.sin(a)*speed,
+      r: 8.5,
+      jitter: rand(0.8, 1.6), // степень хаоса
+      color: '#ffd166',
+      life: rand(10, 16),
+    });
+  }
+
+  // Обработка фаз босса
+  function bossBehavior(dt) {
+    // Переходы по HP
+    if (boss.phase < 3 && boss.hp <= totalHPBeforePhase(boss.phase + 1)) {
+      // переход в следующую фазу
+      boss.phase++;
+      boss.substate = 'transition';
+      boss.subTimer = 1.1;
+      addShake(12);
+      spawnParticles(boss.x, boss.y, '#ff2a6f', 60, 220, 0.9);
+      audio.beep('sawtooth', 300, 0.25, 0.06);
+      audio.beep('sawtooth', 240, 0.35, 0.06);
+    }
+    // Победа
+    if (boss.hp <= 0) {
+      gameWin();
+      return;
+    }
+
+    // Поддерживать босса в пределах поля
+    boss.x = clamp(boss.x, 60, W-60);
+    boss.y = clamp(boss.y, 60, H-60);
+
+    // Таймеры
+    boss.timers.aimed -= dt;
+    boss.timers.ring -= dt;
+    boss.timers.drone -= dt;
+    boss.timers.spiral -= dt;
+    boss.timers.dash -= dt;
+    boss.timers.sweep -= dt;
+    boss.timers.missile -= dt;
+
+    // Базовое движение — немного дрейфа к центру и легкая реакция на игрока
+    const targetX = lerp(CX, player.x, 0.15);
+    const targetY = lerp(H*0.3, player.y, 0.15);
+    const desiredAngle = angleBetween(boss.x, boss.y, targetX, targetY);
+    const accel = 30 + boss.phase*10;
+    boss.vx += Math.cos(desiredAngle) * accel * dt;
+    boss.vy += Math.sin(desiredAngle) * accel * dt;
+    const maxSpeed = 90 + boss.phase*20;
+    const sp = len(boss.vx, boss.vy);
+    if (sp > maxSpeed) {
+      boss.vx *= maxSpeed / sp;
+      boss.vy *= maxSpeed / sp;
+    }
+    boss.x += boss.vx * dt;
+    boss.y += boss.vy * dt;
+    boss.vx *= 0.95; boss.vy *= 0.95;
+
+    // Субсостояния (например, рывок)
+    if (boss.substate === 'transition') {
+      boss.subTimer -= dt;
+      if (boss.subTimer <= 0) boss.substate = 'idle';
+      // Во время перехода — кольцевой взрыв
+      if (boss.timers.ring <= 0) {
+        ringAttack(24 + boss.phase * 6, 180 + boss.phase*30);
+        boss.timers.ring = 99; // один раз в переходе
+      }
+      return;
+    }
+
+    // Атаки по фазам
+    if (boss.phase === 1) phase1(dt);
+    else if (boss.phase === 2) phase2(dt);
+    else phase3(dt);
+  }
+
+  function ringAttack(count, speed, offset=0, color='#ff6b9e', size=5) {
+    for (let i = 0; i < count; i++) {
+      const a = offset + i * (TAU / count);
+      spawnBossBullet(boss.x, boss.y, a, speed, size, 'normal', color);
+    }
+    addShake(3);
+    audio.beep('square', 220, 0.08, 0.04);
+  }
+
+  function aimedBurst(n = 5, spread = 0.25, speed = 240) {
+    const base = angleBetween(boss.x, boss.y, player.x, player.y);
+    for (let i = 0; i < n; i++) {
+      const a = base + lerp(-spread, spread, i/(n-1));
+      spawnBossBullet(boss.x, boss.y, a, speed, 5);
+    }
+    audio.beep('sine', 360, 0.05, 0.03);
+  }
+
+  function spiralAttack(stepDir = 1, rate = 0.05, speed = 260, size=5) {
+    if (boss.timers.spiral <= 0) {
+      if (!spiralAttack.angle) spiralAttack.angle = 0;
+      spiralAttack.angle += stepDir * 0.42;
+      spawnBossBullet(boss.x, boss.y, spiralAttack.angle, speed, size, 'normal', '#ff8bb6');
+      spawnBossBullet(boss.x, boss.y, spiralAttack.angle + Math.PI, speed, size, 'normal', '#ff8bb6');
+      boss.timers.spiral = rate;
+    }
+  }
+
+  function dashAttack(dt) {
+    if (boss.timers.dash <= 0 && boss.substate !== 'dashing') {
+      boss.substate = 'dashing';
+      boss.subTimer = 0.9;
+      const a = angleBetween(boss.x, boss.y, player.x, player.y);
+      boss.vx = Math.cos(a) * (280 + boss.phase*40);
+      boss.vy = Math.sin(a) * (280 + boss.phase*40);
+      // Телеграф — небольшой веер прицельных снарядов перед рывком
+      aimedBurst(3, 0.15, 260);
+      boss.timers.dash = rand(3.8, 5.5) - boss.phase*0.35;
+    }
+    if (boss.substate === 'dashing') {
+      boss.subTimer -= dt;
+      if (boss.subTimer <= 0) {
+        boss.substate = 'idle';
+        // По окончании — кольцо
+        ringAttack(10 + boss.phase*3, 210 + boss.phase*25);
+      }
+    }
+  }
+
+  function missileAttack(count = 3, turn = 1.5, speed = 200) {
+    for (let i = 0; i < count; i++) {
+      const a = rand(0, TAU);
+      const b = { x: boss.x, y: boss.y };
+      const bullet = { x: b.x, y: b.y, vx: Math.cos(a)*speed, vy: Math.sin(a)*speed, r: 5.5, life: 8, type: 'missile', color: '#ff9abf', angle: a, turn };
+      bossBullets.push(bullet);
+    }
+    audio.beep('sawtooth', 480, 0.06, 0.03);
+  }
+
+  function phase1(dt) {
+    // Маленькие антивирусы (хаотичные) — умеренно
+    if (boss.timers.drone <= 0) {
+      for (let i = 0; i < 2; i++) spawnDrone();
+      boss.timers.drone = rand(2.2, 3.2);
+    }
+    // Прицельные очереди
+    if (boss.timers.aimed <= 0) {
+      aimedBurst(5, 0.3, 240);
+      boss.timers.aimed = rand(1.1, 1.6);
+    }
+    // Кольцо периодически
+    if (boss.timers.ring <= 0) {
+      ringAttack(16, 190);
+      boss.timers.ring = rand(4.8, 6.0);
+    }
+  }
+
+  function phase2(dt) {
+    // Дронов больше
+    if (boss.timers.drone <= 0) {
+      for (let i = 0; i < 3; i++) spawnDrone();
+      boss.timers.drone = rand(1.6, 2.2);
+    }
+    // Спиральные снаряды
+    spiralAttack(1, 0.045, 280, 5);
+    // Рывки
+    dashAttack(dt);
+    // Кольцо реже, но плотнее
+    if (boss.timers.ring <= 0) {
+      ringAttack(24, 210);
+      boss.timers.ring = rand(5.0, 6.5);
+    }
+  }
+
+  function phase3(dt) {
+    // Очень много хаоса
+    if (boss.timers.drone <= 0) {
+      for (let i = 0; i < 4; i++) spawnDrone();
+      boss.timers.drone = rand(1.2, 1.8);
+    }
+    // Двойная спираль, быстрее
+    spiralAttack(1, 0.032, 320, 5);
+    // Стены из дуг
+    if (boss.timers.sweep <= 0) {
+      const base = rand(0, TAU);
+      for (let k = 0; k < 3; k++) {
+        const a = base + k * 0.28;
+        for (let i = 0; i < 18; i++) {
+          const aa = a + i * 0.05;
+          spawnBossBullet(boss.x, boss.y, aa, 220, 4.8, 'normal', '#ffa3c3');
+        }
+      }
+      boss.timers.sweep = rand(4.2, 5.6);
+    }
+    // Немного самонаводящихся
+    if (boss.timers.missile <= 0) {
+      missileAttack(3 + randInt(0,1), 1.7, 220);
+      boss.timers.missile = rand(3.0, 4.2);
+    }
+    // Редкие рывки
+    dashAttack(dt);
+  }
+
+  // Обновление мира
+  function update(dt) {
+    // Игрок
+    const ax = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
+    const ay = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0);
+    const accel = 1200;
+    player.vx += ax * accel * dt;
+    player.vy += ay * accel * dt;
+    const maxSpd = 320;
+    const sp = len(player.vx, player.vy);
+    if (sp > maxSpd) { player.vx *= maxSpd/sp; player.vy *= maxSpd/sp; }
+
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+    player.vx *= player.friction;
+    player.vy *= player.friction;
+
+    // Границы
+    const pr = player.r + 2;
+    player.x = clamp(player.x, pr, W - pr);
+    player.y = clamp(player.y, pr, H - pr);
+
+    // Угол к мыши
+    player.angle = angleBetween(player.x, player.y, mouse.x, mouse.y);
+
+    // Стрельба
+    player.shootCD -= dt;
+    if (mouse.down && player.shootCD <= 0) {
+      spawnPlayerBullet();
+      player.shootCD = player.shootRate;
+    }
+
+    if (player.invul > 0) player.invul -= dt;
+
+    // Босс
+    bossBehavior(dt);
+
+    // Обновление снарядов игрока
+    for (let i = playerBullets.length - 1; i >= 0; i--) {
+      const b = playerBullets[i];
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      b.life -= dt;
+      // Столкновение с боссом
+      const dx = b.x - boss.x, dy = b.y - boss.y;
+      if (dx*dx + dy*dy < (b.r + boss.r) * (b.r + boss.r)) {
+        // урон боссу зависит от фазы
+        const dmg = 4.8 + boss.phase*0.6;
+        boss.hp -= dmg;
+        spawnParticles(b.x, b.y, '#43f0ff', 10, 180, 0.4);
+        addShake(2);
+        audio.beep('triangle', 540, 0.05, 0.03);
+        b.life = 0;
+        updateHUD();
+      }
+      if (b.life <= 0 || b.x < -20 || b.x > W+20 || b.y < -20 || b.y > H+20) {
+        playerBullets.splice(i, 1);
+      }
+    }
+
+    // Обновление снарядов босса
+    for (let i = bossBullets.length - 1; i >= 0; i--) {
+      const b = bossBullets[i];
+      // Самонаводящиеся немного корректируют угол
+      if (b.type === 'missile') {
+        const targetAngle = angleBetween(b.x, b.y, player.x, player.y);
+        const diff = normalizeAngle(targetAngle - b.angle);
+        const maxTurn = (b.turn || 1.5) * dt; // рад/с
+        const da = clamp(diff, -maxTurn, maxTurn);
+        b.angle += da;
+        const spd = len(b.vx, b.vy);
+        b.vx = Math.cos(b.angle) * spd;
+        b.vy = Math.sin(b.angle) * spd;
+      }
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      b.life -= dt;
+
+      // Попадание по игроку
+      if (player.alive && player.invul <= 0) {
+        const dx = b.x - player.x, dy = b.y - player.y;
+        if (dx*dx + dy*dy < (b.r + player.r)*(b.r + player.r)) {
+          hitPlayer(1, b.x, b.y);
+          b.life = 0;
+        }
+      }
+      if (b.life <= 0 || b.x < -40 || b.x > W+40 || b.y < -40 || b.y > H+40) {
+        bossBullets.splice(i, 1);
+      }
+    }
+
+    // Обновление дронов (хаотичных маленьких антивирусов)
+    for (let i = drones.length - 1; i >= 0; i--) {
+      const d = drones[i];
+      // Случайная смена направления — хаос
+      const jitter = d.jitter * 2.6;
+      d.vx += rand(-jitter, jitter);
+      d.vy += rand(-jitter, jitter);
+      // Ограничение скорости
+      const spd = len(d.vx, d.vy);
+      const max = 130 + boss.phase*25;
+      if (spd > max) { d.vx *= max/spd; d.vy *= max/spd; }
+
+      d.x += d.vx * dt; d.y += d.vy * dt;
+
+      // Отскок от краёв
+      if (d.x < 20 || d.x > W-20) { d.vx *= -1; d.x = clamp(d.x, 20, W-20); }
+      if (d.y < 20 || d.y > H-20) { d.vy *= -1; d.y = clamp(d.y, 20, H-20); }
+
+      d.life -= dt;
+
+      // Столкновение с игроком
+      if (player.alive && player.invul <= 0) {
+        const dx = d.x - player.x, dy = d.y - player.y;
+        if (dx*dx + dy*dy < (d.r + player.r)*(d.r + player.r)) {
+          hitPlayer(1, d.x, d.y);
+          d.life = 0;
+        }
+      }
+
+      if (d.life <= 0) {
+        spawnParticles(d.x, d.y, '#ffd166', 8, 140, 0.5);
+        drones.splice(i, 1);
+      }
+    }
+
+    // Частицы
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.life -= dt;
+      p.vx *= 0.98; p.vy *= 0.98;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // Обновление HUD
+    updateHUD();
+
+    // Эффект тряски
+    shake = Math.max(0, shake - dt * 18);
+  }
+
+  function normalizeAngle(a) {
+    while (a > Math.PI) a -= TAU;
+    while (a < -Math.PI) a += TAU;
+    return a;
+  }
+
+  function hitPlayer(dmg, sx, sy) {
+    if (!player.alive || player.invul > 0) return;
+    player.lives -= dmg;
+    player.invul = 1.1;
+    spawnParticles(player.x, player.y, '#39e8ff', 24, 220, 0.7);
+    addShake(8);
+    audio.beep('sawtooth', 160, 0.12, 0.06);
+    if (player.lives <= 0) {
+      player.alive = false;
+      gameLose();
+    }
+  }
+
+  // Рендер
+  function render() {
+    // Фоновая сетка/виниетирование
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+
+    // Камера со смещением при тряске
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));
+
+    // Босс
+    drawBoss();
+
+    // Дроны
+    for (const d of drones) drawDrone(d);
+
+    // Снаряды босса
+    for (const b of bossBullets) drawBossBullet(b);
+
+    // Снаряды игрока
+    for (const b of playerBullets) drawPlayerBullet(b);
+
+    // Игрок
+    drawPlayer();
+
+    // Частицы
+    for (const p of particles) drawParticle(p);
+
+    ctx.restore();
+
+    // Курсор-прицел
+    drawCrosshair();
+  }
+
+  function drawBackground() {
+    // Мягкая сетка
+    const step = 40;
+    ctx.save();
+    ctx.globalAlpha = 0.2;
+    ctx.strokeStyle = '#0f2a3a';
+    ctx.lineWidth = 1;
+    for (let x = (performance.now()*0.02 % step); x < W; x += step) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = (performance.now()*0.02 % step); y < H; y += step) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPlayer() {
+    const blink = player.invul > 0 ? (Math.sin(performance.now()*0.02) > 0 ? 0.45 : 1) : 1;
+    ctx.save();
+    if (glowEnabled) { ctx.shadowColor = '#39e8ff'; ctx.shadowBlur = 12; }
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    ctx.globalAlpha = 0.9 * blink;
+
+    // Тело вируса — каплевидный треугольник
+    ctx.fillStyle = '#39e8ff';
+    ctx.beginPath();
+    ctx.moveTo(16, 0);
+    ctx.lineTo(-12, 10);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-12, -10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Контур
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(57,232,255,0.7)';
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawBoss() {
+    ctx.save();
+    if (glowEnabled) { ctx.shadowColor = '#ff2a6f'; ctx.shadowBlur = 20; }
+    ctx.globalAlpha = 0.95;
+
+    // Тело
+    const r = boss.r;
+    const grd = ctx.createRadialGradient(boss.x, boss.y, r*0.2, boss.x, boss.y, r);
+    grd.addColorStop(0, '#ff2a6f');
+    grd.addColorStop(1, '#7f0f2f');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, r, 0, TAU);
+    ctx.fill();
+
+    // Обод
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,42,111,0.8)';
+    ctx.stroke();
+
+    // Глаз/сканер в сторону игрока
+    const a = angleBetween(boss.x, boss.y, player.x, player.y);
+    const eyeR = r*0.45;
+    ctx.translate(boss.x, boss.y);
+    ctx.rotate(a);
+    ctx.fillStyle = '#ff8bb6';
+    ctx.beginPath();
+    ctx.ellipse(r*0.2, 0, eyeR*0.55, eyeR*0.35, 0, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawDrone(d) {
+    ctx.save();
+    if (glowEnabled) { ctx.shadowColor = '#ffd166'; ctx.shadowBlur = 10; }
+    ctx.translate(d.x, d.y);
+    const a = Math.atan2(d.vy, d.vx);
+    ctx.rotate(a);
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-8, 6);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-8, -6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255, 209, 102, 0.8)';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawBossBullet(b) {
+    ctx.save();
+    if (glowEnabled) { ctx.shadowColor = b.color || '#ff6b9e'; ctx.shadowBlur = 10; }
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = b.color || '#ff6b9e';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPlayerBullet(b) {
+    ctx.save();
+    if (glowEnabled) { ctx.shadowColor = '#39e8ff'; ctx.shadowBlur = 8; }
+    ctx.fillStyle = '#39e8ff';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawParticle(p) {
+    ctx.save();
+    if (glowEnabled) { ctx.shadowColor = p.color; ctx.shadowBlur = 10; }
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawCrosshair() {
+    ctx.save();
+    ctx.translate(mouse.x, mouse.y);
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = '#7fe8ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 8, 0, TAU);
+    ctx.moveTo(-12, 0); ctx.lineTo(-4, 0);
+    ctx.moveTo(12, 0); ctx.lineTo(4, 0);
+    ctx.moveTo(0, -12); ctx.lineTo(0, -4);
+    ctx.moveTo(0, 12); ctx.lineTo(0, 4);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Игровой цикл
+  let last = 0;
+  function tick(t) {
+    const time = t || performance.now();
+    let dt = (time - last) / 1000;
+    if (!last) dt = 0;
+    last = time;
+
+    // Ограничим dt, чтобы не было скачков после вкладки в фоне
+    dt = Math.min(dt, 1/30);
+
+    if (gameState === State.Playing) {
+      update(dt);
+    }
+    render();
+    mouse.justPressed = false;
+    requestAnimationFrame(tick);
+  }
+
+  // Пауза/Рестарт/Конец
+  function togglePause() {
+    if (gameState === State.Playing) {
+      gameState = State.Paused;
+      pauseOverlay.style.display = '';
+    } else if (gameState === State.Paused) {
+      gameState = State.Playing;
+      pauseOverlay.style.display = 'none';
+    }
+  }
+
+  function startGame() {
+    menu.style.display = 'none';
+    endOverlay.style.display = 'none';
+    pauseOverlay.style.display = 'none';
+    resetGame();
+    gameState = State.Playing;
+    audio.init();
+  }
+
+  function gameWin() {
+    gameState = State.Win;
+    endOverlay.style.display = '';
+    endPanel.innerHTML = `
+      <h3>Победа!</h3>
+      <p>Ты заразил Антивирус и пережил все 3 фазы.</p>
+      <a class="btn" id="restartBtn">Играть снова</a>
+    `;
+    document.getElementById('restartBtn').onclick = startGame;
+    audio.beep('triangle', 660, 0.12, 0.05);
+    audio.beep('triangle', 880, 0.18, 0.05);
+  }
+
+  function gameLose() {
+    gameState = State.Lose;
+    endOverlay.style.display = '';
+    endPanel.innerHTML = `
+      <h3>Проигрыш</h3>
+      <p>Антивирус оказался крепким орешком. Попробовать ещё?</p>
+      <a class="btn" id="restartBtn">Повторить</a>
+    `;
+    document.getElementById('restartBtn').onclick = startGame;
+    audio.beep('sawtooth', 200, 0.2, 0.07);
+    audio.beep('sawtooth', 140, 0.3, 0.07);
+  }
+
+  startBtn.addEventListener('click', startGame);
+
+  // Инициализация
+  resize();
+  tick();
+
+})();
+</script>
+</body>
+</html>
